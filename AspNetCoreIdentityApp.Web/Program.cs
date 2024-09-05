@@ -1,5 +1,10 @@
+using AspNetCoreIdentityApp.Web.Extensions;
 using AspNetCoreIdentityApp.Web.Models;
+using AspNetCoreIdentityApp.Web.OptionsModels;
+using AspNetCoreIdentityApp.Web.Services;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.FileProviders;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -9,7 +14,27 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 {
   options.UseSqlServer(builder.Configuration.GetConnectionString("SqlCon"));
 });
-builder.Services.AddIdentity<AppUser,AppRole>().AddEntityFrameworkStores<AppDbContext>();
+
+
+builder.Services.AddSingleton<IFileProvider>(new PhysicalFileProvider(Directory.GetCurrentDirectory()));
+builder.Services.AddScoped<IEmailService, EmailService>();
+builder.Services.Configure<EmailSettings>(builder.Configuration.GetSection("EmailSettings"));
+builder.Services.AddIdentityWithExtensions();
+
+builder.Services.ConfigureApplicationCookie(opt =>
+{
+  var cookieBuilder = new CookieBuilder();
+
+  cookieBuilder.Name = "IdentityAppCookie";
+  opt.LoginPath = new PathString("/Home/Signin");
+  opt.LogoutPath = new PathString("/Member/logout");
+  opt.AccessDeniedPath = new PathString("/Member/AccessDenied");
+  opt.Cookie = cookieBuilder;
+  opt.ExpireTimeSpan = TimeSpan.FromDays(60);
+  opt.SlidingExpiration = true;
+
+
+});
 
 var app = builder.Build();
 
@@ -21,15 +46,23 @@ if (!app.Environment.IsDevelopment())
   app.UseHsts();
 }
 
+
 app.UseHttpsRedirection();
 app.UseStaticFiles();
 
 app.UseRouting();
-
+app.UseAuthentication();
 app.UseAuthorization();
+
+app.MapControllerRoute(
+    name: "areas",
+    pattern: "{area:exists}/{controller=Home}/{action=Index}/{id?}");
 
 app.MapControllerRoute(
     name: "default",
     pattern: "{controller=Home}/{action=Index}/{id?}");
+
+
+
 
 app.Run();

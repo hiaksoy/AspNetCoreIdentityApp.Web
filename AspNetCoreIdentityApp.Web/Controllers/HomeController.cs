@@ -1,7 +1,11 @@
 using AspNetCoreIdentityApp.Web.Models;
 using AspNetCoreIdentityApp.Web.ViewModels;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using System.Diagnostics;
+using AspNetCoreIdentityApp.Web.Extensions;
+using AspNetCoreIdentityApp.Web.Services;
+using System.Collections.Generic;
 
 namespace AspNetCoreIdentityApp.Web.Controllers
 {
@@ -9,11 +13,15 @@ namespace AspNetCoreIdentityApp.Web.Controllers
   {
     private readonly ILogger<HomeController> _logger;
     private readonly UserManager<AppUser> _userManager;
+    private readonly SignInManager<AppUser> _signInManager;
+    private readonly IEmailService _emailService;
 
-    public HomeController(ILogger<HomeController> logger, UserManager<AppUser> userManager)
+    public HomeController(ILogger<HomeController> logger, UserManager<AppUser> userManager, SignInManager<AppUser> signInManager, IEmailService emailService)
     {
       _logger = logger;
       _userManager = userManager;
+      _signInManager = signInManager;
+      _emailService = emailService;
     }
 
     public IActionResult Index()
@@ -31,23 +39,148 @@ namespace AspNetCoreIdentityApp.Web.Controllers
       return View();
     }
 
-    [HttpPost]
-    public async Task<IActionResult> Signup(SignUpViewModel request)
+    public IActionResult SignIn()
     {
-      var identityResult = await _userManager.CreateAsync(new() { UserName = request.UserName, PhoneNumber = request.Phone, Email = request.Email }, request.PasswordConfirm);
+      return View();
+    }
 
-      if (identityResult.Succeeded)
+    [HttpPost]
+    public async Task<IActionResult> SignIn(SignInViewModel model, string returnUrl = null)
+    {
+
+      if (!ModelState.IsValid)
       {
-        ViewBag.Message = "Üyelik katýr iþlemi baþarýyla gerçekleþmiþtir.";
         return View();
       }
 
-      foreach (IdentityError item in identityResult.Errors)
+      returnUrl = returnUrl ?? Url.Action("Index", "Home");
+
+      var isUser = await _userManager.FindByEmailAsync(model.Email);
+
+      if (isUser == null)
       {
-        ModelState.AddModelError(string.Empty, item.Description);
+        ModelState.AddModelError(string.Empty, "Email veya Þifre yanlýþ");
+        return View();
       }
+
+      var signInResult = await _signInManager.PasswordSignInAsync(isUser, model.Password, model.RememberMe, true);
+
+      if (signInResult.Succeeded)
+      {
+        return Redirect(returnUrl);
+      }
+
+      if (signInResult.IsLockedOut)
+      {
+        ModelState.AddModelErrorList(new List<string>() { "3 dakika boyunca giriþ yapamazsýnýz" });
+        return View();
+      }
+
+
+      ModelState.AddModelErrorList(new List<string>() { $"Email veya Þifre yanlýþ", $"Baþarýþýz giriþ sayýsý : {await _userManager.GetAccessFailedCountAsync(isUser)}" });
+
+
+      return View();
+
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> Signup(SignUpViewModel request)
+    {
+
+      if (!ModelState.IsValid)
+      {
+        return View();
+      }
+
+      var identityResult = await _userManager.CreateAsync(new() { UserName = request.UserName, PhoneNumber = request.Phone, Email = request.Email }, request.PasswordConfirm);
+
+
+      if (identityResult.Succeeded)
+      {
+        TempData["SuccessMessage"] = "Üyelik kayýt iþlemi baþarýyla gerçekleþmiþtir.";
+        return View();
+      }
+
+      ModelState.AddModelErrorList(identityResult.Errors.Select(x => x.Description).ToList());
       return View();
     }
+
+    public IActionResult ForgetPassword()
+    {
+      return View();
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> ForgetPassword(ForgetPasswordViewModel request)
+    {
+      var hasUser = await _userManager.FindByEmailAsync(request.Email);
+
+      if (hasUser == null)
+      {
+        ModelState.AddModelError(string.Empty, "Bu Email Adresine sahip kullanýcý bulunamamýþtýr.");
+        return View();
+      }
+
+      string passwordResetToken = await _userManager.GeneratePasswordResetTokenAsync(hasUser);
+
+      var passwordResetLink = Url.Action("ResetPassword", "Home", new { userId = hasUser.Id, Token = passwordResetToken }, HttpContext.Request.Scheme);
+
+      //app password uqus bmjl esgg tkxv
+
+      await _emailService.SendResetPasswordEmail(passwordResetLink, hasUser.Email);
+
+
+      TempData["success"] = "Þifre sýfýrlama linki e-posta adresinize gönderilmiþtir.";
+      return RedirectToAction(nameof(ForgetPassword));
+
+    }
+
+    public async Task<IActionResult> ResetPasswordAsync(string userId, string token)
+    {
+      TempData["userId"] = userId;
+      TempData["token"] = token;
+
+      await Task.CompletedTask;
+      return View();
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> ResetPassword(ResetPasswordViewModel request)
+    {
+      var userId = TempData["userId"];
+      var token = TempData["token"];
+
+      if(userId==null || token== null)
+      {
+        throw new Exception("Bir hata meydana geldi");
+      }
+
+
+      var hasUser = await _userManager.FindByIdAsync(userId.ToString());
+
+      if (hasUser == null)
+      {
+        ModelState.AddModelError(string.Empty, "Kullanýcý bulunamadý.");
+        return View();
+      }
+
+      var result = await _userManager.ResetPasswordAsync(hasUser, token.ToString(), request.Password);
+
+      if(result.Succeeded)
+      {
+        TempData["SuccessMessage"] = "Þifreniz baþarýyla yenilenmiþtir.";
+      }
+      else
+      {
+        ModelState.AddModelErrorList(result.Errors.Select(x => x.Description).ToList());
+      }
+
+      return View();
+
+    }
+
+
 
     [ResponseCache(Duration = 0, Location = ResponseCacheLocation.None, NoStore = true)]
     public IActionResult Error()
