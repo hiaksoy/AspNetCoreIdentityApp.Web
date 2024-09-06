@@ -6,6 +6,7 @@ using System.Diagnostics;
 using AspNetCoreIdentityApp.Web.Extensions;
 using AspNetCoreIdentityApp.Web.Services;
 using System.Collections.Generic;
+using System.Security.Claims;
 
 namespace AspNetCoreIdentityApp.Web.Controllers
 {
@@ -63,12 +64,9 @@ namespace AspNetCoreIdentityApp.Web.Controllers
         return View();
       }
 
+
       var signInResult = await _signInManager.PasswordSignInAsync(isUser, model.Password, model.RememberMe, true);
 
-      if (signInResult.Succeeded)
-      {
-        return Redirect(returnUrl);
-      }
 
       if (signInResult.IsLockedOut)
       {
@@ -76,11 +74,19 @@ namespace AspNetCoreIdentityApp.Web.Controllers
         return View();
       }
 
+      if (!signInResult.Succeeded)
+      {
+        ModelState.AddModelErrorList(new List<string>() { $"Email veya Þifre yanlýþ", $"Baþarýþýz giriþ sayýsý : {await _userManager.GetAccessFailedCountAsync(isUser)}" });
+        return View();
+      }
 
-      ModelState.AddModelErrorList(new List<string>() { $"Email veya Þifre yanlýþ", $"Baþarýþýz giriþ sayýsý : {await _userManager.GetAccessFailedCountAsync(isUser)}" });
+      if(!string.IsNullOrEmpty(isUser.BirthDate.ToString()))
+      {
+          await _signInManager.SignInWithClaimsAsync(isUser, model.RememberMe, new[] { new Claim("birthdate", isUser.BirthDate.ToString()) });
+      }
 
+        return Redirect(returnUrl);
 
-      return View();
 
     }
 
@@ -95,15 +101,31 @@ namespace AspNetCoreIdentityApp.Web.Controllers
 
       var identityResult = await _userManager.CreateAsync(new() { UserName = request.UserName, PhoneNumber = request.Phone, Email = request.Email }, request.PasswordConfirm);
 
-
-      if (identityResult.Succeeded)
+      if (!identityResult.Succeeded)
       {
-        TempData["SuccessMessage"] = "Üyelik kayýt iþlemi baþarýyla gerçekleþmiþtir.";
+        ModelState.AddModelErrorList(identityResult.Errors.Select(x => x.Description).ToList());
         return View();
       }
 
-      ModelState.AddModelErrorList(identityResult.Errors.Select(x => x.Description).ToList());
-      return View();
+      var exchangeExpireClaim = new Claim("ExchangeExpireDate", DateTime.Now.AddDays(10).ToString());
+
+      var user = await _userManager.FindByNameAsync(request.UserName);
+
+      var claimResult = await _userManager.AddClaimAsync(user, exchangeExpireClaim);
+
+      if (!claimResult.Succeeded)
+      {
+        ModelState.AddModelErrorList(claimResult.Errors.Select(x => x.Description).ToList());
+        return View();
+      }
+
+
+      TempData["SuccessMessage"] = "Üyelik kayýt iþlemi baþarýyla gerçekleþmiþtir.";
+
+
+      return RedirectToAction(nameof(HomeController.Signup));
+
+
     }
 
     public IActionResult ForgetPassword()
@@ -151,7 +173,7 @@ namespace AspNetCoreIdentityApp.Web.Controllers
       var userId = TempData["userId"];
       var token = TempData["token"];
 
-      if(userId==null || token== null)
+      if (userId == null || token == null)
       {
         throw new Exception("Bir hata meydana geldi");
       }
@@ -167,7 +189,7 @@ namespace AspNetCoreIdentityApp.Web.Controllers
 
       var result = await _userManager.ResetPasswordAsync(hasUser, token.ToString(), request.Password);
 
-      if(result.Succeeded)
+      if (result.Succeeded)
       {
         TempData["SuccessMessage"] = "Þifreniz baþarýyla yenilenmiþtir.";
       }

@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Rendering;
 using Microsoft.Extensions.FileProviders;
+using System.Security.Claims;
 
 namespace AspNetCoreIdentityApp.Web.Controllers
 {
@@ -143,7 +144,7 @@ namespace AspNetCoreIdentityApp.Web.Controllers
 
       var updateToUserResult = await _userManager.UpdateAsync(currentUser);
 
-      if(!updateToUserResult.Succeeded)
+      if (!updateToUserResult.Succeeded)
       {
         ModelState.AddModelErrorList(updateToUserResult.Errors);
         return View();
@@ -151,8 +152,15 @@ namespace AspNetCoreIdentityApp.Web.Controllers
 
       await _userManager.UpdateSecurityStampAsync(currentUser);
       await _signInManager.SignOutAsync();
-      await _signInManager.SignInAsync(currentUser,true);
 
+      if (!string.IsNullOrEmpty(request.BirthDate.ToString()))
+      {
+        await _signInManager.SignInWithClaimsAsync(currentUser, true, new[] { new Claim("birthdate", currentUser.BirthDate.ToString()) });
+      }
+      else
+      {
+        await _signInManager.SignInAsync(currentUser, true);
+      }
 
       TempData["SuccessMessage"] = "Bilgileriniz başarıyla Güncellenmiştir.";
 
@@ -173,7 +181,7 @@ namespace AspNetCoreIdentityApp.Web.Controllers
     }
 
     [HttpGet]
-    public async Task<IActionResult> Claims()
+    public IActionResult Claims()
     {
       var userClaimList = User.Claims.Select(x => new ClaimViewModel()
       {
@@ -184,6 +192,31 @@ namespace AspNetCoreIdentityApp.Web.Controllers
       return View(userClaimList);
 
     }
+
+
+    [Authorize(Policy = "AnkaraPolicy")]
+    [HttpGet]
+    public IActionResult AnkaraPage()
+    {
+      return View();
+    }
+
+    [Authorize(Policy = "ExchangePolicy")]
+    [HttpGet]
+    public IActionResult ExchangePage()
+    {
+      return View();
+    }
+
+    [Authorize(Policy = "ViolancePolicy")]
+    [HttpGet]
+    public IActionResult ViolancePage()
+    {
+      return View();
+    }
+
+
+
 
 
     public IActionResult AccessDenied(string ReturnUrl)
